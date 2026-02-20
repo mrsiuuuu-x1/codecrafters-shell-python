@@ -1,6 +1,7 @@
 import sys
 import shutil
 import os
+import subprocess
 
 BUILTIN = {"exit", "echo", "type"}
 
@@ -25,7 +26,12 @@ def main():
                 else:
                     print(f"{target}: not found")               
         else:
-            print(f"{command}: command not found")
+            parts = command.split() 
+            exe_name = parts[0]
+            if shutil.which(exe_name):
+                subprocess.run(parts)
+            else:
+                print(f"{command}: command not found")
 
 if __name__ == "__main__":
     main()
