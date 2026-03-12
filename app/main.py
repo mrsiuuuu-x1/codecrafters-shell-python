@@ -19,6 +19,7 @@ def main():
             print(os.getcwd())
         elif command.startswith("cd "):
             path = command[3:].strip()
+            path = os.path.expanduser(path)
             try:
                 os.chdir(path)
             except FileNotFoundError:
