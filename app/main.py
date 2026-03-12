@@ -16,6 +16,11 @@ def parse_command(command):
             while i < len(command) and command[i] != "'":
                 current += command[i]
                 i += 1
+        elif c == '"':
+            i += 1
+            while i < len(command) and command[i] != '"':
+                current += command[i]
+                i += 1
         elif c == " ":
             if current:
                 tokens.append(current)
