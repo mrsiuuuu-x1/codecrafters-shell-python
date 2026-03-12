@@ -3,7 +3,7 @@ import shutil
 import os
 import subprocess
 
-BUILTIN = {"exit", "echo", "type", "pwd"}
+BUILTIN = {"exit", "echo", "type", "pwd", "cd"}
 
 def main():
     while True:
@@ -17,6 +17,12 @@ def main():
             break     
         elif command == "pwd":
             print(os.getcwd())
+        elif command.startswith("cd "):
+            path = command[3:].strip()
+            try:
+                os.chdir(path)
+            except FileNotFoundError:
+                print(f"cd: {path}: No such file or directory")
         elif command.startswith("type "):
             target = command[5:]
             if target in BUILTIN:
