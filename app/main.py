@@ -3,7 +3,7 @@ import shutil
 import os
 import subprocess
 
-BUILTIN = {"exit", "echo", "type"}
+BUILTIN = {"exit", "echo", "type", "pwd"}
 
 def main():
     while True:
@@ -15,6 +15,8 @@ def main():
             print(command[5:])      
         elif command.startswith("exit"):
             break     
+        elif command == "pwd":
+            print(os.getcwd())
         elif command.startswith("type "):
             target = command[5:]
             if target in BUILTIN:
