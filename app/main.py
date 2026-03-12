@@ -87,8 +87,6 @@ def parse_redirections(args):
             stderr_append = False
             i += 2
         else:
-            # Handle cases like "2>/tmp/foo" (no space between operator and path)
-            # by re-tokenising inside parse_command we won't hit this, but just in case:
             clean_args.append(tok)
             i += 1
 
