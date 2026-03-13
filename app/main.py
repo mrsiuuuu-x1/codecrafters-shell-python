@@ -112,6 +112,13 @@ def get_completions(text):
 
 
 def read_line_with_completion():
+    if not sys.stdin.isatty():
+        sys.stdout.flush()
+        try:
+            return input()
+        except EOFError:
+            raise
+
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     buf = ""
@@ -284,11 +291,7 @@ def run_pipeline(pipeline_parts):
             stdin_src = prev_read if prev_read else None
             stdout_dst = None if is_last else subprocess.PIPE
 
-            p = subprocess.Popen(
-                tokens,
-                stdin=stdin_src,
-                stdout=stdout_dst,
-            )
+            p = subprocess.Popen(tokens, stdin=stdin_src, stdout=stdout_dst)
             if prev_read:
                 prev_read.close()
             prev_read = p.stdout
