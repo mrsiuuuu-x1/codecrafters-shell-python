@@ -297,10 +297,7 @@ def format_history(entries, start_index):
 def do_history_r(path):
     global history
     file_entries = read_file_history(path)
-    # keep current session entries, prepend file entries before them
-    # find where session entries start by keeping track externally
-    # simplest correct behavior: replace history with file_entries + current history
-    history = file_entries + history
+    history = history + file_entries
 
 
 def run_history_cmd(args, write_fn):
