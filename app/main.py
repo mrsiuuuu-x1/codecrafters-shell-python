@@ -5,6 +5,7 @@ import subprocess
 import tty
 import termios
 import re
+import glob
 
 BUILTIN = {"exit", "echo", "type", "pwd", "cd", "history"}
 HISTORY_FILE = os.path.expanduser("~/.shell_history")
@@ -18,29 +19,30 @@ def strip_ansi(s):
     return ANSI_ESCAPE.sub('', s)
 
 
-def load_history():
+def load_history_from_file(path):
     global history
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "r") as f:
+    path = os.path.expanduser(path)
+    if os.path.exists(path):
+        with open(path, "r") as f:
             lines = [line.rstrip("\n") for line in f.readlines()]
             history = [l for l in lines if l]
 
 
-def write_history_to_file():
-    d = os.path.dirname(HISTORY_FILE)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    with open(HISTORY_FILE, "w") as f:
+def write_history_to_file(path):
+    path = os.path.expanduser(path)
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    with open(path, "w") as f:
         for entry in history[-MAX_HISTORY:]:
             f.write(entry + "\n")
 
 
-def append_session_to_file(session_entries):
-    d = os.path.dirname(HISTORY_FILE)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    with open(HISTORY_FILE, "a") as f:
-        for entry in session_entries:
+def append_history_to_file(path, entries):
+    path = os.path.expanduser(path)
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    with open(path, "a") as f:
+        for entry in entries:
             f.write(entry + "\n")
 
 
@@ -48,6 +50,8 @@ def add_history(line):
     line = strip_ansi(line).strip()
     if line:
         history.append(line)
+        return line
+    return None
 
 
 def parse_command(command):
@@ -114,7 +118,7 @@ def open_redirect(path, append):
     return open(path, "a" if append else "w")
 
 
-def get_completions(text):
+def get_command_completions(text):
     completions = set()
     for b in BUILTIN:
         if b.startswith(text):
@@ -129,6 +133,20 @@ def get_completions(text):
         except (FileNotFoundError, PermissionError):
             pass
     return sorted(completions)
+
+
+def get_path_completions(text):
+    if text.startswith("~"):
+        text = os.path.expanduser(text)
+    pattern = text + "*"
+    matches = glob.glob(pattern)
+    result = []
+    for m in sorted(matches):
+        if os.path.isdir(m):
+            result.append(m + "/")
+        else:
+            result.append(m)
+    return result
 
 
 def read_line_with_completion():
@@ -194,8 +212,9 @@ def read_line_with_completion():
                 last_was_tab = False
 
             elif ch == "\t":
-                if " " not in buf:
-                    completions = get_completions(buf)
+                has_space = " " in buf.rstrip()
+                if not has_space:
+                    completions = get_command_completions(buf)
                     if len(completions) == 1:
                         completed = completions[0]
                         suffix = completed[len(buf):]
@@ -225,7 +244,38 @@ def read_line_with_completion():
                         sys.stdout.flush()
                         last_was_tab = False
                 else:
-                    last_was_tab = False
+                    parts = buf.split(" ")
+                    current_word = parts[-1]
+                    completions = get_path_completions(current_word)
+                    if len(completions) == 1:
+                        completed = completions[0]
+                        suffix = completed[len(current_word):]
+                        buf = buf + suffix
+                        sys.stdout.write(suffix)
+                        sys.stdout.flush()
+                        last_was_tab = False
+                    elif len(completions) > 1:
+                        prefix = os.path.commonprefix(completions)
+                        if len(prefix) > len(current_word):
+                            suffix = prefix[len(current_word):]
+                            buf = buf + suffix
+                            sys.stdout.write(suffix)
+                            sys.stdout.flush()
+                            last_was_tab = False
+                        else:
+                            if last_was_tab:
+                                display = [os.path.basename(c.rstrip("/")) + ("/" if c.endswith("/") else "") for c in completions]
+                                sys.stdout.write("\r\n" + "  ".join(display) + "\r\n$ " + buf)
+                                sys.stdout.flush()
+                                last_was_tab = False
+                            else:
+                                sys.stdout.write("\a")
+                                sys.stdout.flush()
+                                last_was_tab = True
+                    else:
+                        sys.stdout.write("\a")
+                        sys.stdout.flush()
+                        last_was_tab = False
 
             elif ch >= " ":
                 last_was_tab = False
@@ -262,15 +312,22 @@ def run_builtin_to_string(cmd, args):
             else:
                 out.append(f"{target}: not found")
     elif cmd == "history":
-        n = None
-        if args:
-            try:
-                n = int(args[0])
-            except ValueError:
-                pass
-        entries = history[-n:] if n else history
-        start = len(history) - len(entries)
-        out.extend(format_history(entries, start))
+        if args and args[0] == "-r" and len(args) >= 2:
+            load_history_from_file(args[1])
+        elif args and args[0] == "-w" and len(args) >= 2:
+            write_history_to_file(args[1])
+        elif args and args[0] == "-a" and len(args) >= 2:
+            append_history_to_file(args[1], history)
+        else:
+            n = None
+            if args:
+                try:
+                    n = int(args[0])
+                except ValueError:
+                    pass
+            entries = history[-n:] if n else history
+            start = len(history) - len(entries)
+            out.extend(format_history(entries, start))
     return "\n".join(out)
 
 
@@ -348,7 +405,7 @@ def run_command(cmd, args, stdout_target, stderr_target, session_entries):
 
     if cmd == "exit":
         code = int(args[0]) if args else 0
-        append_session_to_file(session_entries)
+        append_history_to_file(HISTORY_FILE, session_entries)
         sys.exit(code)
 
     elif cmd == "echo":
@@ -376,16 +433,23 @@ def run_command(cmd, args, stdout_target, stderr_target, session_entries):
                 write_stderr(f"{target}: not found")
 
     elif cmd == "history":
-        n = None
-        if args:
-            try:
-                n = int(args[0])
-            except ValueError:
-                pass
-        entries = history[-n:] if n else history
-        start = len(history) - len(entries)
-        for line in format_history(entries, start):
-            write_stdout(line)
+        if args and args[0] == "-r" and len(args) >= 2:
+            load_history_from_file(args[1])
+        elif args and args[0] == "-w" and len(args) >= 2:
+            write_history_to_file(args[1])
+        elif args and args[0] == "-a" and len(args) >= 2:
+            append_history_to_file(args[1], history)
+        else:
+            n = None
+            if args:
+                try:
+                    n = int(args[0])
+                except ValueError:
+                    pass
+            entries = history[-n:] if n else history
+            start = len(history) - len(entries)
+            for line in format_history(entries, start):
+                write_stdout(line)
 
     else:
         exe = shutil.which(cmd)
@@ -411,15 +475,16 @@ def main():
         try:
             command = read_line_with_completion()
         except EOFError:
-            append_session_to_file(session_entries)
+            append_history_to_file(HISTORY_FILE, session_entries)
             break
 
         command = strip_ansi(command).strip()
         if not command:
             continue
 
-        add_history(command)
-        session_entries.append(command)
+        entry = add_history(command)
+        if entry:
+            session_entries.append(entry)
 
         if "|" in command:
             pipeline_parts = command.split("|")
@@ -445,8 +510,6 @@ def main():
                 stdout_target.close()
             if stderr_target:
                 stderr_target.close()
-
-    append_session_to_file(session_entries)
 
 
 if __name__ == "__main__":
