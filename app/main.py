@@ -11,15 +11,35 @@ HISTORY_FILE = os.path.expanduser("~/.shell_history")
 MAX_HISTORY = 1000
 history = []
 
-ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 
 
 def strip_ansi(s):
     return ANSI_ESCAPE.sub('', s)
 
 
-def save_history():
+def load_history():
+    global history
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            lines = [line.rstrip("\n") for line in f.readlines()]
+            history = [l for l in lines if l]
+
+
+def append_history_to_file(entries):
+    d = os.path.dirname(HISTORY_FILE)
+    if d:
+        os.makedirs(d, exist_ok=True)
     with open(HISTORY_FILE, "a") as f:
+        for entry in entries:
+            f.write(entry + "\n")
+
+
+def write_history_to_file():
+    d = os.path.dirname(HISTORY_FILE)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    with open(HISTORY_FILE, "w") as f:
         for entry in history[-MAX_HISTORY:]:
             f.write(entry + "\n")
 
@@ -88,9 +108,9 @@ def parse_redirections(args):
 
 
 def open_redirect(path, append):
-    d = os.path.dirname(path)
-    if d:
-        os.makedirs(d, exist_ok=True)
+    path = os.path.expanduser(path)
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
     return open(path, "a" if append else "w")
 
 
@@ -313,6 +333,7 @@ def run_command(cmd, args, stdout_target, stderr_target):
     def write_stdout(text):
         if stdout_target:
             stdout_target.write(text + "\n")
+            stdout_target.flush()
         else:
             sys.stdout.write(text + "\n")
             sys.stdout.flush()
@@ -320,12 +341,14 @@ def run_command(cmd, args, stdout_target, stderr_target):
     def write_stderr(text):
         if stderr_target:
             stderr_target.write(text + "\n")
+            stderr_target.flush()
         else:
             sys.stderr.write(text + "\n")
             sys.stderr.flush()
 
     if cmd == "exit":
         code = int(args[0]) if args else 0
+        write_history_to_file()
         sys.exit(code)
 
     elif cmd == "echo":
@@ -372,11 +395,16 @@ def run_command(cmd, args, stdout_target, stderr_target):
                 stdout=stdout_target if stdout_target else None,
                 stderr=stderr_target if stderr_target else None,
             )
+            if stdout_target:
+                stdout_target.flush()
         else:
             write_stderr(f"{cmd}: command not found")
 
 
 def main():
+    load_history()
+    session_start = len(history)
+
     while True:
         sys.stdout.write("$ ")
         sys.stdout.flush()
@@ -384,6 +412,7 @@ def main():
         try:
             command = read_line_with_completion()
         except EOFError:
+            append_history_to_file(history[session_start:])
             break
 
         command = strip_ansi(command).strip()
@@ -416,6 +445,8 @@ def main():
                 stdout_target.close()
             if stderr_target:
                 stderr_target.close()
+
+    write_history_to_file()
 
 
 if __name__ == "__main__":
