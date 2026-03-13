@@ -212,20 +212,23 @@ def read_line_with_completion():
                 last_was_tab = False
 
             elif ch == "\t":
-                has_space = " " in buf.rstrip()
-                if not has_space:
-                    completions = get_command_completions(buf)
+                tokens_so_far = buf.split(" ")
+                is_command_pos = len(tokens_so_far) == 1
+
+                if is_command_pos:
+                    word = tokens_so_far[0]
+                    completions = get_command_completions(word)
                     if len(completions) == 1:
                         completed = completions[0]
-                        suffix = completed[len(buf):]
+                        suffix = completed[len(word):]
                         buf = completed + " "
                         sys.stdout.write(suffix + " ")
                         sys.stdout.flush()
                         last_was_tab = False
                     elif len(completions) > 1:
                         prefix = os.path.commonprefix(completions)
-                        if len(prefix) > len(buf):
-                            suffix = prefix[len(buf):]
+                        if len(prefix) > len(word):
+                            suffix = prefix[len(word):]
                             buf = prefix
                             sys.stdout.write(suffix)
                             sys.stdout.flush()
@@ -244,12 +247,15 @@ def read_line_with_completion():
                         sys.stdout.flush()
                         last_was_tab = False
                 else:
-                    parts = buf.split(" ")
-                    current_word = parts[-1]
+                    current_word = tokens_so_far[-1]
                     completions = get_path_completions(current_word)
                     if len(completions) == 1:
                         completed = completions[0]
                         suffix = completed[len(current_word):]
+                        if os.path.isdir(completed.rstrip("/")):
+                            suffix = suffix.rstrip("/") + "/"
+                        else:
+                            suffix = suffix + " "
                         buf = buf + suffix
                         sys.stdout.write(suffix)
                         sys.stdout.flush()
@@ -264,7 +270,10 @@ def read_line_with_completion():
                             last_was_tab = False
                         else:
                             if last_was_tab:
-                                display = [os.path.basename(c.rstrip("/")) + ("/" if c.endswith("/") else "") for c in completions]
+                                display = []
+                                for c in completions:
+                                    base = os.path.basename(c.rstrip("/"))
+                                    display.append(base + "/" if c.endswith("/") else base)
                                 sys.stdout.write("\r\n" + "  ".join(display) + "\r\n$ " + buf)
                                 sys.stdout.flush()
                                 last_was_tab = False
