@@ -19,13 +19,12 @@ def strip_ansi(s):
     return ANSI_ESCAPE.sub('', s)
 
 
-def load_history_from_file(path):
-    global history
+def read_file_history(path):
     path = os.path.expanduser(path)
     if os.path.exists(path):
         with open(path, "r") as f:
-            lines = [line.rstrip("\n") for line in f.readlines()]
-            history = [l for l in lines if l]
+            return [line.rstrip("\n") for line in f.readlines() if line.strip()]
+    return []
 
 
 def write_history_to_file(path):
@@ -295,6 +294,36 @@ def format_history(entries, start_index):
     return lines
 
 
+def do_history_r(path):
+    global history
+    file_entries = read_file_history(path)
+    # keep current session entries, prepend file entries before them
+    # find where session entries start by keeping track externally
+    # simplest correct behavior: replace history with file_entries + current history
+    history = file_entries + history
+
+
+def run_history_cmd(args, write_fn):
+    global history
+    if args and args[0] == "-r" and len(args) >= 2:
+        do_history_r(args[1])
+    elif args and args[0] == "-w" and len(args) >= 2:
+        write_history_to_file(args[1])
+    elif args and args[0] == "-a" and len(args) >= 2:
+        append_history_to_file(args[1], history)
+    else:
+        n = None
+        if args:
+            try:
+                n = int(args[0])
+            except ValueError:
+                pass
+        entries = history[-n:] if n else history
+        start = len(history) - len(entries)
+        for line in format_history(entries, start):
+            write_fn(line)
+
+
 def run_builtin_to_string(cmd, args):
     out = []
     if cmd == "echo":
@@ -312,22 +341,9 @@ def run_builtin_to_string(cmd, args):
             else:
                 out.append(f"{target}: not found")
     elif cmd == "history":
-        if args and args[0] == "-r" and len(args) >= 2:
-            load_history_from_file(args[1])
-        elif args and args[0] == "-w" and len(args) >= 2:
-            write_history_to_file(args[1])
-        elif args and args[0] == "-a" and len(args) >= 2:
-            append_history_to_file(args[1], history)
-        else:
-            n = None
-            if args:
-                try:
-                    n = int(args[0])
-                except ValueError:
-                    pass
-            entries = history[-n:] if n else history
-            start = len(history) - len(entries)
-            out.extend(format_history(entries, start))
+        collected = []
+        run_history_cmd(args, lambda line: collected.append(line))
+        out.extend(collected)
     return "\n".join(out)
 
 
@@ -433,23 +449,7 @@ def run_command(cmd, args, stdout_target, stderr_target, session_entries):
                 write_stderr(f"{target}: not found")
 
     elif cmd == "history":
-        if args and args[0] == "-r" and len(args) >= 2:
-            load_history_from_file(args[1])
-        elif args and args[0] == "-w" and len(args) >= 2:
-            write_history_to_file(args[1])
-        elif args and args[0] == "-a" and len(args) >= 2:
-            append_history_to_file(args[1], history)
-        else:
-            n = None
-            if args:
-                try:
-                    n = int(args[0])
-                except ValueError:
-                    pass
-            entries = history[-n:] if n else history
-            start = len(history) - len(entries)
-            for line in format_history(entries, start):
-                write_stdout(line)
+        run_history_cmd(args, write_stdout)
 
     else:
         exe = shutil.which(cmd)
