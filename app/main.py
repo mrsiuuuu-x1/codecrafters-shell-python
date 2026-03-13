@@ -5,7 +5,30 @@ import subprocess
 import tty
 import termios
 
-BUILTIN = {"exit", "echo", "type", "pwd", "cd"}
+BUILTIN = {"exit", "echo", "type", "pwd", "cd", "history"}
+HISTORY_FILE = os.path.expanduser("~/.shell_history")
+MAX_HISTORY = 1000
+history = []
+
+
+def load_history():
+    global history
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            history = [line.rstrip("\n") for line in f.readlines()]
+
+
+def save_history():
+    with open(HISTORY_FILE, "w") as f:
+        for entry in history[-MAX_HISTORY:]:
+            f.write(entry + "\n")
+
+
+def add_history(line):
+    if line:
+        history.append(line)
+        save_history()
+
 
 def parse_command(command):
     tokens = []
@@ -13,17 +36,14 @@ def parse_command(command):
     i = 0
     while i < len(command):
         c = command[i]
-
         if c == "\\" and i + 1 < len(command):
             i += 1
             current += command[i]
-
         elif c == "'":
             i += 1
             while i < len(command) and command[i] != "'":
                 current += command[i]
                 i += 1
-
         elif c == '"':
             i += 1
             while i < len(command) and command[i] != '"':
@@ -33,20 +53,15 @@ def parse_command(command):
                 else:
                     current += command[i]
                 i += 1
-
         elif c in (" ", "\t"):
             if current:
                 tokens.append(current)
                 current = ""
-
         else:
             current += c
-
         i += 1
-
     if current:
         tokens.append(current)
-
     return tokens
 
 
@@ -56,7 +71,6 @@ def parse_redirections(args):
     stdout_append = False
     stderr_append = False
     clean_args = []
-
     i = 0
     while i < len(args):
         tok = args[i]
@@ -70,7 +84,6 @@ def parse_redirections(args):
             stderr_file = args[i + 1]; stderr_append = False; i += 2
         else:
             clean_args.append(tok); i += 1
-
     return clean_args, stdout_file, stdout_append, stderr_file, stderr_append
 
 
@@ -82,13 +95,10 @@ def open_redirect(path, append):
 
 
 def get_completions(text):
-    """Return sorted list of completions for the given prefix."""
     completions = set()
-
     for b in BUILTIN:
         if b.startswith(text):
             completions.add(b)
-
     for directory in os.environ.get("PATH", "").split(":"):
         try:
             for name in os.listdir(directory):
@@ -98,16 +108,16 @@ def get_completions(text):
                         completions.add(name)
         except (FileNotFoundError, PermissionError):
             pass
-
     return sorted(completions)
 
 
 def read_line_with_completion():
-    """Read a line from stdin with tab-completion support."""
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     buf = ""
     last_was_tab = False
+    hist_index = len(history)
+    saved_buf = ""
 
     try:
         tty.setraw(fd)
@@ -117,7 +127,6 @@ def read_line_with_completion():
             if ch in ("\r", "\n"):
                 sys.stdout.write("\r\n")
                 sys.stdout.flush()
-                last_was_tab = False
                 return buf
 
             elif ch == "\x7f":
@@ -130,7 +139,6 @@ def read_line_with_completion():
             elif ch == "\x03":
                 sys.stdout.write("^C\r\n")
                 sys.stdout.flush()
-                last_was_tab = False
                 return ""
 
             elif ch == "\x04":
@@ -138,24 +146,39 @@ def read_line_with_completion():
                 sys.stdout.flush()
                 raise EOFError
 
+            elif ch == "\x1b":
+                seq = sys.stdin.read(2)
+                if seq == "[A":
+                    if hist_index == len(history):
+                        saved_buf = buf
+                    if hist_index > 0:
+                        hist_index -= 1
+                        new_buf = history[hist_index]
+                        sys.stdout.write("\r$ " + new_buf + " " * max(0, len(buf) - len(new_buf)) + "\r$ " + new_buf)
+                        sys.stdout.flush()
+                        buf = new_buf
+                elif seq == "[B":
+                    if hist_index < len(history):
+                        hist_index += 1
+                        new_buf = history[hist_index] if hist_index < len(history) else saved_buf
+                        sys.stdout.write("\r$ " + new_buf + " " * max(0, len(buf) - len(new_buf)) + "\r$ " + new_buf)
+                        sys.stdout.flush()
+                        buf = new_buf
+                last_was_tab = False
+
             elif ch == "\t":
                 if " " not in buf:
                     completions = get_completions(buf)
-
                     if len(completions) == 1:
-                        # Unique match
                         completed = completions[0]
                         suffix = completed[len(buf):]
                         buf = completed + " "
                         sys.stdout.write(suffix + " ")
                         sys.stdout.flush()
                         last_was_tab = False
-
                     elif len(completions) > 1:
                         prefix = os.path.commonprefix(completions)
-
                         if len(prefix) > len(buf):
-                            # Can extend to common prefix
                             suffix = prefix[len(buf):]
                             buf = prefix
                             sys.stdout.write(suffix)
@@ -163,26 +186,21 @@ def read_line_with_completion():
                             last_was_tab = False
                         else:
                             if last_was_tab:
-                                # Second tab — show all options
-                                sys.stdout.write("\r\n")
-                                sys.stdout.write("  ".join(completions))
-                                sys.stdout.write("\r\n$ " + buf)
+                                sys.stdout.write("\r\n" + "  ".join(completions) + "\r\n$ " + buf)
                                 sys.stdout.flush()
                                 last_was_tab = False
                             else:
-                                # First tab — ring bell
                                 sys.stdout.write("\a")
                                 sys.stdout.flush()
                                 last_was_tab = True
                     else:
-                        # No completions
                         sys.stdout.write("\a")
                         sys.stdout.flush()
                         last_was_tab = False
                 else:
                     last_was_tab = False
 
-            elif ch >= " ":  # printable character
+            elif ch >= " ":
                 last_was_tab = False
                 buf += ch
                 sys.stdout.write(ch)
@@ -191,35 +209,94 @@ def read_line_with_completion():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+
+def run_builtin_to_string(cmd, args):
+    out = []
+    if cmd == "echo":
+        out.append(" ".join(args))
+    elif cmd == "pwd":
+        out.append(os.getcwd())
+    elif cmd == "type":
+        target = args[0] if args else ""
+        if target in BUILTIN:
+            out.append(f"{target} is a shell builtin")
+        else:
+            found = shutil.which(target)
+            if found:
+                out.append(f"{target} is {found}")
+            else:
+                out.append(f"{target}: not found")
+    elif cmd == "history":
+        n = None
+        if args:
+            try:
+                n = int(args[0])
+            except ValueError:
+                pass
+        entries = history[-n:] if n else history
+        total = len(history)
+        start = total - len(entries)
+        for i, entry in enumerate(entries):
+            out.append(f"  {start + i + 1}  {entry}")
+    return "\n".join(out)
+
+
 def run_pipeline(pipeline_parts):
-    """Run a list of command strings connected by pipes."""
-    procs = []
-    prev_stdout = None
-
-    for i, part in enumerate(pipeline_parts):
+    parsed_parts = []
+    for part in pipeline_parts:
         tokens = parse_command(part.strip())
-        if not tokens:
-            continue
-        is_last = (i == len(pipeline_parts) - 1)
-        stdin_src = prev_stdout
-        stdout_dst = None if is_last else subprocess.PIPE
+        if tokens:
+            parsed_parts.append(tokens)
 
-        exe = shutil.which(tokens[0])
-        if exe:
+    if not parsed_parts:
+        return
+
+    procs = []
+    prev_read = None
+
+    for i, tokens in enumerate(parsed_parts):
+        cmd = tokens[0]
+        args = tokens[1:]
+        is_last = (i == len(parsed_parts) - 1)
+        is_builtin = cmd in BUILTIN
+
+        if is_builtin:
+            builtin_out = run_builtin_to_string(cmd, args)
+            if is_last:
+                if prev_read:
+                    prev_read.close()
+                print(builtin_out)
+            else:
+                r_fd, w_fd = os.pipe()
+                with os.fdopen(w_fd, "w") as wf:
+                    wf.write(builtin_out + "\n")
+                if prev_read:
+                    prev_read.close()
+                prev_read = os.fdopen(r_fd, "r")
+        else:
+            exe = shutil.which(cmd)
+            if not exe:
+                print(f"{cmd}: command not found", file=sys.stderr)
+                if prev_read:
+                    prev_read.close()
+                return
+
+            stdin_src = prev_read if prev_read else None
+            stdout_dst = None if is_last else subprocess.PIPE
+
             p = subprocess.Popen(
                 tokens,
                 stdin=stdin_src,
                 stdout=stdout_dst,
             )
-            if prev_stdout:
-                prev_stdout.close()
-            prev_stdout = p.stdout
+            if prev_read:
+                prev_read.close()
+            prev_read = p.stdout
             procs.append(p)
-        else:
-            print(f"{tokens[0]}: command not found", file=sys.stderr)
 
     for p in procs:
         p.wait()
+
 
 def run_command(cmd, args, stdout_target, stderr_target):
     def write_stdout(text):
@@ -262,6 +339,19 @@ def run_command(cmd, args, stdout_target, stderr_target):
             else:
                 write_stderr(f"{target}: not found")
 
+    elif cmd == "history":
+        n = None
+        if args:
+            try:
+                n = int(args[0])
+            except ValueError:
+                pass
+        entries = history[-n:] if n else history
+        total = len(history)
+        start = total - len(entries)
+        for i, entry in enumerate(entries):
+            write_stdout(f"  {start + i + 1}  {entry}")
+
     else:
         exe = shutil.which(cmd)
         if exe:
@@ -273,7 +363,10 @@ def run_command(cmd, args, stdout_target, stderr_target):
         else:
             write_stderr(f"{cmd}: command not found")
 
+
 def main():
+    load_history()
+
     while True:
         sys.stdout.write("$ ")
         sys.stdout.flush()
@@ -287,7 +380,8 @@ def main():
         if not command:
             continue
 
-        # Handle pipelines
+        add_history(command)
+
         if "|" in command:
             pipeline_parts = command.split("|")
             run_pipeline(pipeline_parts)
