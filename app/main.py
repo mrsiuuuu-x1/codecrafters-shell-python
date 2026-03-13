@@ -26,21 +26,21 @@ def load_history():
             history = [l for l in lines if l]
 
 
-def append_history_to_file(entries):
-    d = os.path.dirname(HISTORY_FILE)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    with open(HISTORY_FILE, "a") as f:
-        for entry in entries:
-            f.write(entry + "\n")
-
-
 def write_history_to_file():
     d = os.path.dirname(HISTORY_FILE)
     if d:
         os.makedirs(d, exist_ok=True)
     with open(HISTORY_FILE, "w") as f:
         for entry in history[-MAX_HISTORY:]:
+            f.write(entry + "\n")
+
+
+def append_session_to_file(session_entries):
+    d = os.path.dirname(HISTORY_FILE)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    with open(HISTORY_FILE, "a") as f:
+        for entry in session_entries:
             f.write(entry + "\n")
 
 
@@ -329,7 +329,7 @@ def run_pipeline(pipeline_parts):
         p.wait()
 
 
-def run_command(cmd, args, stdout_target, stderr_target):
+def run_command(cmd, args, stdout_target, stderr_target, session_entries):
     def write_stdout(text):
         if stdout_target:
             stdout_target.write(text + "\n")
@@ -348,7 +348,7 @@ def run_command(cmd, args, stdout_target, stderr_target):
 
     if cmd == "exit":
         code = int(args[0]) if args else 0
-        write_history_to_file()
+        append_session_to_file(session_entries)
         sys.exit(code)
 
     elif cmd == "echo":
@@ -402,8 +402,7 @@ def run_command(cmd, args, stdout_target, stderr_target):
 
 
 def main():
-    load_history()
-    session_start = len(history)
+    session_entries = []
 
     while True:
         sys.stdout.write("$ ")
@@ -412,7 +411,7 @@ def main():
         try:
             command = read_line_with_completion()
         except EOFError:
-            append_history_to_file(history[session_start:])
+            append_session_to_file(session_entries)
             break
 
         command = strip_ansi(command).strip()
@@ -420,6 +419,7 @@ def main():
             continue
 
         add_history(command)
+        session_entries.append(command)
 
         if "|" in command:
             pipeline_parts = command.split("|")
@@ -439,14 +439,14 @@ def main():
         stderr_target = open_redirect(stderr_file, stderr_append) if stderr_file else None
 
         try:
-            run_command(cmd, args, stdout_target, stderr_target)
+            run_command(cmd, args, stdout_target, stderr_target, session_entries)
         finally:
             if stdout_target:
                 stdout_target.close()
             if stderr_target:
                 stderr_target.close()
 
-    write_history_to_file()
+    append_session_to_file(session_entries)
 
 
 if __name__ == "__main__":
