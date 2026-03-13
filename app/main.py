@@ -18,15 +18,8 @@ def strip_ansi(s):
     return ANSI_ESCAPE.sub('', s)
 
 
-def load_history():
-    global history
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "r") as f:
-            history = [line.rstrip("\n") for line in f.readlines()]
-
-
 def save_history():
-    with open(HISTORY_FILE, "w") as f:
+    with open(HISTORY_FILE, "a") as f:
         for entry in history[-MAX_HISTORY:]:
             f.write(entry + "\n")
 
@@ -35,7 +28,6 @@ def add_history(line):
     line = strip_ansi(line).strip()
     if line:
         history.append(line)
-        save_history()
 
 
 def parse_command(command):
@@ -298,8 +290,8 @@ def run_pipeline(pipeline_parts):
         else:
             exe = shutil.which(cmd)
             if not exe:
-                sys.stdout.write(f"{cmd}: command not found\n")
-                sys.stdout.flush()
+                sys.stderr.write(f"{cmd}: command not found\n")
+                sys.stderr.flush()
                 if prev_read:
                     prev_read.close()
                 return
@@ -385,8 +377,6 @@ def run_command(cmd, args, stdout_target, stderr_target):
 
 
 def main():
-    load_history()
-
     while True:
         sys.stdout.write("$ ")
         sys.stdout.flush()
