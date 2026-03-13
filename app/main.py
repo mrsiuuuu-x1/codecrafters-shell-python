@@ -11,6 +11,7 @@ BUILTIN = {"exit", "echo", "type", "pwd", "cd", "history"}
 HISTORY_FILE = os.path.expanduser("~/.shell_history")
 MAX_HISTORY = 1000
 history = []
+last_appended_index = 0
 
 ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 
@@ -301,13 +302,15 @@ def do_history_r(path):
 
 
 def run_history_cmd(args, write_fn):
-    global history
+    global history, last_appended_index
     if args and args[0] == "-r" and len(args) >= 2:
         do_history_r(args[1])
     elif args and args[0] == "-w" and len(args) >= 2:
         write_history_to_file(args[1])
     elif args and args[0] == "-a" and len(args) >= 2:
-        append_history_to_file(args[1], history)
+        new_entries = history[last_appended_index:]
+        append_history_to_file(args[1], new_entries)
+        last_appended_index = len(history)
     else:
         n = None
         if args:
