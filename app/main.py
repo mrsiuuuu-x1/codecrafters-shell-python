@@ -4,11 +4,18 @@ import os
 import subprocess
 import tty
 import termios
+import re
 
 BUILTIN = {"exit", "echo", "type", "pwd", "cd", "history"}
 HISTORY_FILE = os.path.expanduser("~/.shell_history")
 MAX_HISTORY = 1000
 history = []
+
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def strip_ansi(s):
+    return ANSI_ESCAPE.sub('', s)
 
 
 def load_history():
@@ -25,6 +32,7 @@ def save_history():
 
 
 def add_history(line):
+    line = strip_ansi(line).strip()
     if line:
         history.append(line)
         save_history()
@@ -217,6 +225,14 @@ def read_line_with_completion():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def format_history(entries, start_index):
+    lines = []
+    for i, entry in enumerate(entries):
+        num = start_index + i + 1
+        lines.append(f"  {num}  {entry}")
+    return lines
+
+
 def run_builtin_to_string(cmd, args):
     out = []
     if cmd == "echo":
@@ -241,10 +257,8 @@ def run_builtin_to_string(cmd, args):
             except ValueError:
                 pass
         entries = history[-n:] if n else history
-        total = len(history)
-        start = total - len(entries)
-        for i, entry in enumerate(entries):
-            out.append(f"  {start + i + 1}  {entry}")
+        start = len(history) - len(entries)
+        out.extend(format_history(entries, start))
     return "\n".join(out)
 
 
@@ -272,7 +286,8 @@ def run_pipeline(pipeline_parts):
             if is_last:
                 if prev_read:
                     prev_read.close()
-                print(builtin_out)
+                sys.stdout.write(builtin_out + "\n")
+                sys.stdout.flush()
             else:
                 r_fd, w_fd = os.pipe()
                 with os.fdopen(w_fd, "w") as wf:
@@ -283,7 +298,8 @@ def run_pipeline(pipeline_parts):
         else:
             exe = shutil.which(cmd)
             if not exe:
-                print(f"{cmd}: command not found", file=sys.stderr)
+                sys.stdout.write(f"{cmd}: command not found\n")
+                sys.stdout.flush()
                 if prev_read:
                     prev_read.close()
                 return
@@ -306,13 +322,15 @@ def run_command(cmd, args, stdout_target, stderr_target):
         if stdout_target:
             stdout_target.write(text + "\n")
         else:
-            print(text)
+            sys.stdout.write(text + "\n")
+            sys.stdout.flush()
 
     def write_stderr(text):
         if stderr_target:
             stderr_target.write(text + "\n")
         else:
-            print(text, file=sys.stderr)
+            sys.stderr.write(text + "\n")
+            sys.stderr.flush()
 
     if cmd == "exit":
         code = int(args[0]) if args else 0
@@ -350,10 +368,9 @@ def run_command(cmd, args, stdout_target, stderr_target):
             except ValueError:
                 pass
         entries = history[-n:] if n else history
-        total = len(history)
-        start = total - len(entries)
-        for i, entry in enumerate(entries):
-            write_stdout(f"  {start + i + 1}  {entry}")
+        start = len(history) - len(entries)
+        for line in format_history(entries, start):
+            write_stdout(line)
 
     else:
         exe = shutil.which(cmd)
@@ -379,7 +396,7 @@ def main():
         except EOFError:
             break
 
-        command = command.strip()
+        command = strip_ansi(command).strip()
         if not command:
             continue
 
