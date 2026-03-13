@@ -8,7 +8,7 @@ import re
 import glob
 
 BUILTIN = {"exit", "echo", "type", "pwd", "cd", "history"}
-HISTORY_FILE = os.path.expanduser("~/.shell_history")
+HISTORY_FILE = os.environ.get("HISTFILE", os.path.expanduser("~/.shell_history"))
 MAX_HISTORY = 1000
 history = []
 last_appended_index = 0
@@ -466,7 +466,13 @@ def run_command(cmd, args, stdout_target, stderr_target, session_entries):
 
 
 def main():
+    global last_appended_index
     session_entries = []
+
+    if os.path.exists(HISTORY_FILE):
+        loaded = read_file_history(HISTORY_FILE)
+        history.extend(loaded)
+        last_appended_index = len(history)
 
     while True:
         sys.stdout.write("$ ")
